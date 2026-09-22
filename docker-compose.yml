@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shiftgrid
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shiftgrid}
+      POSTGRES_DB: shiftgrid
+    # Do not publish 5432 publicly in production — app reaches db on the compose network.
+    expose:
+      - "5432"
+    volumes:
+      - shiftgrid_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiftgrid -d shiftgrid"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://shiftgrid:${POSTGRES_PASSWORD:-shiftgrid}@db:5432/shiftgrid
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-in-production-use-openssl-rand}
+      AUTH_TRUST_HOST: "true"
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@shiftgrid.local}
+    command: sh -c "npx prisma migrate deploy && node server.js"
+
+volumes:
+  shiftgrid_pg:

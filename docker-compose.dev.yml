@@ -1,0 +1,21 @@
+# Dev database only (app runs via npm run dev)
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shiftgrid
+      POSTGRES_PASSWORD: shiftgrid
+      POSTGRES_DB: shiftgrid
+    ports:
+      - "5432:5432"
+    volumes:
+      - shiftgrid_pg_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiftgrid -d shiftgrid"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  shiftgrid_pg_dev:

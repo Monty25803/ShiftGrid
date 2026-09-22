@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="ShiftGrid">
+  <rect width="64" height="64" rx="14" fill="#1F6F5B"/>
+  <rect x="14" y="16" width="36" height="32" rx="4" fill="#FFFDF8"/>
+  <rect x="14" y="16" width="36" height="8" rx="4" fill="#163F36"/>
+  <rect x="14" y="20" width="36" height="4" fill="#163F36"/>
+  <rect x="18" y="28" width="12" height="8" rx="1.5" fill="#1F6F5B" opacity="0.35"/>
+  <rect x="34" y="28" width="12" height="8" rx="1.5" fill="#C48C3C"/>
+  <rect x="18" y="38" width="12" height="8" rx="1.5" fill="#1F6F5B" opacity="0.55"/>
+  <rect x="34" y="38" width="12" height="8" rx="1.5" fill="#1F6F5B" opacity="0.25"/>
+</svg>

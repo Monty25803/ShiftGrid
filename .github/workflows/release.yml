@@ -1,0 +1,161 @@
+name: Release
+
+# Push to main/master → auto tag + release notes + Windows .exe
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    # Skip automatic release when commit message includes [skip release]
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip release]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  tag:
+    needs: quality
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create next version tag
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          LAST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1 || true)
+          if [ -z "$LAST" ]; then
+            MAJOR=0
+            MINOR=1
+            PATCH=0
+            VERSION="0.1.0"
+          else
+            RAW=${LAST#v}
+            MAJOR=$(echo "$RAW" | cut -d. -f1)
+            MINOR=$(echo "$RAW" | cut -d. -f2)
+            PATCH=$(echo "$RAW" | cut -d. -f3 | sed 's/[^0-9].*//')
+            MAJOR=${MAJOR:-0}
+            MINOR=${MINOR:-1}
+            PATCH=${PATCH:-0}
+            PATCH=$((PATCH + 1))
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          TAG="v${VERSION}"
+          while git rev-parse "$TAG" >/dev/null 2>&1; do
+            PATCH=$((PATCH + 1))
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            TAG="v${VERSION}"
+          done
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "ShiftGrid $TAG — automatic release"
+          git push origin "$TAG"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Created and pushed $TAG"
+
+  windows-exe:
+    needs: tag
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Sync package version
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.version=process.env.V; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+        env:
+          V: ${{ needs.tag.outputs.version }}
+
+      - name: Build Next.js
+        env:
+          AUTH_SECRET: ci-build-secret-not-for-production
+          AUTH_TRUST_HOST: "true"
+          NEXTAUTH_URL: http://127.0.0.1:3847
+          DATABASE_URL: postgresql://shiftgrid:shiftgrid@127.0.0.1:5432/shiftgrid
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
+      - name: Build Windows installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiftgrid-windows-${{ needs.tag.outputs.tag }}
+          path: dist-desktop/*.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: ShiftGrid ${{ needs.tag.outputs.tag }}
+          generate_release_notes: true
+          body: |
+            ## ShiftGrid ${{ needs.tag.outputs.tag }}
+
+            Automatic release from push to `${{ github.ref_name }}`.
+
+            ### Run preference
+            | Mode | How |
+            |------|-----|
+            | **Windows Desktop (offline daytime)** | Install the `.exe` attached below |
+            | **Web / Docker** | See [DEPLOYMENT.md](https://github.com/${{ github.repository }}/blob/main/docs/DEPLOYMENT.md) |
+
+            ### Installer
+            Download the NSIS setup → install → open **ShiftGrid**.
+            Nightly backups: **Settings → Offline backup** → OneDrive / Google Drive folder.
+
+            ---
+            Changelog: [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+          files: |
+            dist-desktop/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
